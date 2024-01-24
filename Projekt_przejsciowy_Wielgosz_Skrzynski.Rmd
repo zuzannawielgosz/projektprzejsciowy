@@ -1,0 +1,529 @@
+---
+title: "Analiza czynników wpływających na ryzyko udaru mózgu"
+author: "Zuzanna Wielgosz, Adam Skrzyński"
+date: '`r Sys.Date()`'
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+#code from https://selbydavid.com/2017/06/18/rmarkdown-alerts/
+knitr::knit_hooks$set(
+   error = function(x, options) {
+     paste('\n\n<div class="alert alert-danger">',
+           gsub('##', '\n', gsub('^##\ Error', '**Error**', x)),
+           '</div>', sep = '\n')
+   },
+   warning = function(x, options) {
+     paste('\n\n<div class="alert alert-warning">',
+           gsub('##', '\n', gsub('^##\ Warning:', '**Warning**', x)),
+           '</div>', sep = '\n')
+   },
+   message = function(x, options) {
+     paste('\n\n<div class="alert alert-info">',
+           gsub('##', '\n', x),
+           '</div>', sep = '\n')
+   }
+)
+
+```
+
+### Opis projektu
+
+Analiza czynników wpływających na ryzyko udaru mózgu ma na celu integrację nauki i edukacji w obszarze zdrowia. 
+Poprzez wykorzystanie danych zbioru "Stroke Prediction Dataset", projekt skupia się na identyfikacji czynników ryzyka udaru, tworzeniu modelu predykcyjnego oraz edukacji na temat objawów, prewencji 
+i szybkiego reagowania.
+Analiza danych, wizualizacje i przekazanie informacji o udarze mają wspólnie stanowić narzędzie wspierające świadomość zdrowotną i promocję zdrowego stylu życia.
+
+### Wybrany zbiór danych
+
+Wybranym do analizy zbiorem danych jest zbiór o nazwie
+Stroke prediction dataset.
+
+Adres:
+<https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset?resource=download>
+
+Stroke prediction dataset analizuje dane osobowe oraz zdrowotne dla
+ponad 5000 pacjentów. Główna zmienna modelowana to stroke, ma ona dwie
+klasy: pacjent przeszedł zawał lub nie.
+
+### Ekstrakacja danych
+
+Dane zostały wczytane z pliku csv wykorzysując funkcję read.csv z
+dodatkowymi atrybutami: - header = TRUE, ponieważ zbiór danych zawiera
+nagłówki - stringsAsFactors=TRUE, w celu zapisywania wartości tekstowych
+w postaci zmiennych kategorycznych
+
+```{r}
+
+stroke <- read.csv("https://storage.googleapis.com/kagglesdsdata/datasets/1120859/1882037/healthcare-dataset-stroke-data.csv?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=gcp-kaggle-com%40kaggle-161607.iam.gserviceaccount.com%2F20240123%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20240123T214754Z&X-Goog-Expires=259200&X-Goog-SignedHeaders=host&X-Goog-Signature=321f55d69f988d50edbb380008c0c2d1a504a91d45ed14229637bcd6721c5cfd326356605125fdeb9968d4691349c2ca138daa3d3b08814796d689bc56102c002388d8468ce90e6314225d4115038d4fbd34642fc6127e1c0a5d6467daaef24fecfe5a11b1e7065a1ecf3f9f1834c2da0f5efcab63f1aae7a1e0406b6175544cb6c47c97eb1cbdea5f8d753b7bcc55616069874c242fac7b5081d293ab7030262c2aceb0ec3ca90d5bf32c2552edc61dd38e194f12f1e25765127e72fa46b86fd5042e235ddfb8350d6d8833897a1467b7460f6ea7deba39c66785cb2fa78a46135bf1e8f89aa34b5cb468604e7b428dfb0cd139781d300b8131eb6ccb5665a6", header=TRUE, stringsAsFactors=TRUE)
+
+head(stroke)
+
+```
+
+Analizując tabelę, można zauważyć że zawiera ona 11 różnych zmiennych
+(pierwszą kolumną jest id pacjenta, które nie jest potrzebne do analizy
+zbioru danych - nie wnosi do analizy żadnych przydatnych informacji).
+
+Główną zmienną modelowaną jest "stroke", ma ona dwie klasy: pacjent
+przeszedł udar (1) lub nie (0).
+
+### Statystyki analizowanych danych
+
+```{r}
+library(ggplot2)
+library(vioplot)
+library(dplyr)
+stroke <- stroke[,-1]
+
+head(stroke)
+
+nrow(stroke)
+ncol(stroke)
+summary(stroke)
+
+sapply(stroke, class)
+```
+
+Główna kolumna danych (**stroke**) jest typu integer, ponieważ zawiera
+jedynie dane 0-1. Należy je jednak traktować jako wartości kategoryczne,
+gdzie 0 oznacza "False", a 1 oznacza "True". Nie należy tych danych
+traktować jako danych liczbowych.
+
+Podobna sytuacja występuje dla wartości **hypertension** oraz
+**heart_disease**, gdzie są dane 0-1 i oznaczają brak wystąpienia lub
+wystąpienie danego schorzenia.
+
+Wartości **age**, **bmi** (wg wywołanej funkcji, dane są typu factor,
+jednak wynika to z zapisu danych brakujących, o których wspomniano w
+następnym punkcie) oraz **avg_glucose_level** są zmiennymi typu numeric,
+a pozostałe kolumny są danymi kategorycznymi, czyli factor.
+
+### Brakujące dane
+
+Przyglądając się powyższemu podsumowaniu zbioru danych, można zauważyć,
+że w kolumnie **bmi** znajdują się dane brakujące oznaczone jako "N/A"
+oraz w kolumnie **smoking**, oznaczone jako "Unknown". Ilość takich
+danych dla poszczególnych kolumn wynosi odpowiednio 201 i 1544.
+
+### Dane odstające
+
+W pierwszym kroku zdecydowano się na przeanalizowanie wartości bmi. W
+tym celu, dane zostały przefiltrowane poprzez usunięcie wierszy z
+wartościami N/A, a następnie utworzeno listę, której można użyć do
+wykresu wiolinowego.
+
+```{r}
+
+stroke_clean_bmi <- stroke[!stroke$bmi == "N/A",]
+
+stroke_clean_bmi$bmi  <- as.numeric(as.character(stroke_clean_bmi$bmi))
+
+stroke_clean_bmi$stroke <- as.factor(stroke_clean_bmi$stroke)
+  bmi_list <- lapply(levels(stroke_clean_bmi[["stroke"]]), 
+                       function(x) stroke_clean_bmi[ stroke_clean_bmi[, "stroke"] == x, "bmi"]
+)
+
+names(bmi_list) <- c("no stroke", "stroke")
+  
+library(vioplot)
+
+vioplot(bmi_list, col=c("#512b58", "#fe346e"))
+
+#minimalne normalne bmi
+bmi_min <- 18.5
+lines(c(0, 4), c(bmi_min, bmi_min), col="blue", lty=2, lwd=0.2)
+text(2.4, bmi_min, paste("bmi_min =", bmi_min, sep=""), col="blue", pos=1, cex=0.6)
+
+#maksymalne normalne bmi
+bmi_max <- 24.9
+lines(c(0, 4), c(bmi_max, bmi_max), col="purple", lty=2, lwd=0.2)
+text(2.4, bmi_max, paste("bmi_max =", bmi_max, sep=""), col="purple", pos=3, cex=0.6)
+```
+
+Na wykresie zostały dodatkowo naniesione wartości minimalnego i maksymalnego bmi dla zdrowego człowieka.
+
+Można zauważyć, że wśrod wartości bmi w analizowanym zbiorze danych nie ma wartości znacznie odstających.
+
+
+
+## Analiza danych
+
+### Wiek
+Pierwszym krokiem analizy jest sprawdzenie zależności udaru lub jego braku od wieku pacjenta.  Ten graficzny sposób prezentacji danych pozwoli na szybką identyfikację ewentualnych wzorców związanych z wiekiem a ryzykiem udarów, co może być istotne dla lekarzy i badaczy zajmujących się prewencją udarów oraz dostosowaniem strategii opieki zdrowotnej.
+
+```{r}
+
+# Tworzenie nowej kolumny age_category na podstawie wieku
+stroke$age_category <- cut(stroke$age,
+                           breaks = c(-Inf, 12, 17, 40, 70, Inf),
+                           labels = c("children", "teens", "adults", "mid adults", "elderly"),
+                           include.lowest = TRUE)
+
+
+age_cat <- table(stroke$stroke, stroke$age_category)
+
+
+barplot(age_cat,
+main = "Stroke/No Stroke vs age",
+xlab = "age",
+col = c("#512b58","#fe346e"),
+beside = TRUE
+)
+legend("topleft",
+c("No stroke","Stroke"),
+fill = c("#512b58","#fe346e")
+)
+
+
+# Filtracja danych tylko dla stroke = 1
+filtered_stroke_data <- subset(stroke, stroke == 1)
+
+# Tabela przestawna dla stroke = 0 i kategorii wieku
+age_cat <- table(filtered_stroke_data$stroke, filtered_stroke_data$age_category)
+
+# Wykres słupkowy
+barplot(age_cat,
+        main = "No Stroke vs Age Category",
+        xlab = "Age Category",
+        col = c("#fe346e", "#512b58"),
+        beside = TRUE
+)
+
+# Legenda
+legend("topleft",
+       c("No stroke"),
+       fill = c("#512b58")
+)
+
+
+hist(filtered_stroke_data$age,
+     main = "Histogram Age for Stroke = 1",
+     xlab = "Age",
+     ylab = "Frequency",
+     col = "pink",
+     border = "black",
+     xlim = c(20, 100),
+)
+
+
+# Age-Stroke Distribution
+ggplot(stroke, aes(x = age, fill = stroke)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Age-Stroke Distribution",
+       x = "Age",
+       y = "") +
+scale_fill_manual(values = c("#512b58", "#fe346e"), labels = c("No Stroke", "Stroke")) +
+  theme_minimal() +
+  guides(fill = guide_legend(title = NULL)) +
+  xlim(0, 100) +  
+  theme(axis.line.y = element_blank(),  
+        axis.text.y = element_blank()) 
+
+
+
+```
+
+
+
+
+```{r}
+
+#age
+stroke$stroke <- as.factor(stroke$stroke)
+age_list <- lapply(levels(stroke[["stroke"]]), 
+                       function(x) stroke[ stroke[, "stroke"] == x, "age"]
+)
+names(age_list) <- c("no stroke", "stroke")
+
+vioplot(age_list, col=c("pink", "#512b58"))
+
+
+```
+
+Widać że w naszych danych zdecydowanie przeważają dane na temat pacjentów zdrowych, w tym przypadku po prostu takich którzy nie doświadczyli udaru
+Mid adults to przedział pomiędzy 40 a 70 lat
+
+Analiza wykresu sugeruje, że ryzyko wystąpienia udaru mózgu (stroke) zwiększa się wraz z wiekiem. Widać, że udary w dużej mierze zaczęły pojawiać się mid adults do elderly. Całą tą obserwacje potwierdza histogram jak i 3 wykres, gdzie widzimy, że dużą część osób z udarem to osoby w wieku 60-90 lat.
+
+Jest to zrozumiałem wpływa na to takie czynniki jak:
+
+Różnice w stylu życia:
+Dorośli i starsi ludzie często prowadzą bardziej siedzący tryb życia niż dzieci i młodzież. Mniej aktywny tryb życia, brak regularnej aktywności fizycznej i złe nawyki żywieniowe mogą zwiększać ryzyko chorób sercowo-naczyniowych, w tym udaru.
+
+Czynniki związane z wiekiem:
+Z wiekiem organizm ulega naturalnemu procesowi starzenia, co może prowadzić do akumulacji uszkodzeń komórkowych, miażdżycy i innych czynników zwiększających ryzyko udaru.
+
+Czynniki genetyczne:
+Niektóre osoby mogą być genetycznie predysponowane do chorób sercowo-naczyniowych, co z kolei zwiększa ryzyko udaru. Geny mogą wpływać na czynniki takie jak poziom cholesterolu, ciśnienie krwi i skłonność do miażdżycy.
+
+Choroby współistniejące:
+Starsze osoby często mają większą liczbę chorób współistniejących, takich jak cukrzyca, nadciśnienie, choroby serca itp. Te choroby zwiększają ryzyko udaru.
+
+
+Stres:
+Dorośli i osoby starsze mogą częściej doświadczać stresu związanego z pracą, finansami, czy zdrowiem. Stres ten może wpływać na ogólne zdrowie serca i zwiększać ryzyko udaru.
+
+
+
+### Glukoza
+
+Wykres poziomu glukozy w zależności od obecności udaru lub jego braku u badanych pacjentów. Ten graficzny sposób prezentacji danych umożliwi zidentyfikowanie potencjalnych zależności między poziomem glukozy a ryzykiem udarów, co może być istotne dla lekarzy i badaczy zajmujących się zrozumieniem wpływu kontrolowania poziomu cukru na zdrowie naczyniowo-mózgowe pacjentów.
+
+```{r}
+
+
+#glucose
+stroke$stroke <- as.factor(stroke$stroke)
+glucose_list <- lapply(levels(stroke[["stroke"]]), 
+                       function(x) stroke[ stroke[, "stroke"] == x, "avg_glucose_level"]
+)
+names(glucose_list) <- c("no stroke", "stroke")
+
+vioplot(glucose_list, col=c("#512b58", "#fe346e"))
+
+# Glucose-Stroke Distribution
+ggplot(stroke, aes(x = avg_glucose_level, fill = factor(stroke))) +
+  geom_density(alpha = 0.7) +
+  scale_fill_manual(values = c("#512b58", "#fe346e"), labels = c("Healthy", "Stroke")) +
+  labs(title = "Glucose-Stroke Distribution",
+       x = "Average Glucose Level",
+       y = "") +
+  theme_minimal() +
+  xlim(20, 300)+
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(title = NULL)) +
+  theme(axis.line.y = element_blank(),  
+        axis.text.y = element_blank())
+
+
+```
+
+Wykres średniego poziomu glukozy, wskazuje, że największą ilość przypadków mamy na poziomie 70-100 mg/dl cukru we krwi, ten poziom jest uznawany za norme, normalnie na czczo człowiek powinien mieć 70-99mg/dl a 2h po posiłku wynosić poniżej 140mg/dl. Jak widzimy dalej skala 160 - 250mg/dl wskazuje już tutaj, że poziom glukozy ma wpływ na udar, ponieważ dwukrotnie przewyższa ilość osób zdrowych. 
+
+
+Cukrzyca i insulinooporność:
+Poziomy glukozy w zakresie 150-250 są często związane z cukrzycą lub insulinoopornością. Cukrzyca jest chorobą, która zwiększa ryzyko chorób sercowo-naczyniowych, w tym udaru. Podwyższony poziom glukozy może prowadzić do uszkodzeń naczyń krwionośnych i miażdżycy, zwiększając ryzyko udaru.
+
+Problemy z regulacją glukozy po udarze:
+Osoby, które doświadczyły udaru, mogą mieć trudności z kontrolą poziomu glukozy. Zaburzenia metaboliczne po udarze mogą wpływać na poziom cukru we krwi, co z kolei zwiększa ryzyko powikłań sercowo-naczyniowych.
+
+Związek między cukrzycą a udarem:
+Cukrzyca jest uznawana za istotny czynnik ryzyka udaru. Zaburzenia metaboliczne związane z cukrzycą mogą prowadzić do uszkodzeń naczyń krwionośnych, tworzenia się zakrzepów, a w konsekwencji do udaru mózgu.
+
+Rola stanu zapalnego:
+Podwyższony poziom glukozy może wpływać na stan zapalny w organizmie, co również może przyczyniać się do uszkodzeń naczyń krwionośnych. Stan zapalny jest związany z rozwojem chorób sercowo-naczyniowych.
+
+
+### Palenie papierosów
+
+Poniżej przedstawiono wykres występowania udarów lub nie w
+zależności od tego czy pacjent palił wraz ze statystykami liczbowymi.
+
+```{r}
+# Smoking status
+ggplot(stroke, aes(x = factor(smoking_status), fill = factor(stroke))) +
+  geom_bar(position = 'dodge', stat = 'count', width = 0.7) +
+  geom_text(aes(label = ..count..), stat = 'count', position = position_dodge(width = 0.7), vjust = -0.5) +  # Display count values on bars
+  scale_fill_manual(values = c("#2c003e", "#fe346e"), labels = c("Healthy", "Stroke")) +
+  scale_x_discrete(labels = c("Formaly Smoked", "Never Smoked","Smokes","Unknown")) +  # Change labels here
+  labs(title = "Smoking Status And Risk",
+       x = "Smoking Status",
+       y = "") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(title = NULL)) +
+  ylim(c(0, 2000))  # Set your desired y-axis limits
+
+
+
+smoking_status <- table(stroke$stroke, stroke$smoking_status)
+
+smoking_status
+
+
+```
+
+Na powyższym wykresie można zauważyć, że ze zgromadzonych danych nie można wysnuć wniosku czy palenie w znaczącym stopniu wpływa na ryzyko udaru. Jednak według aktualnej wiedzy medycznej zdecydowanie jest to czynnik zdecydowanie istotny w przypadku udaru mózgu.
+
+
+### BMI
+
+
+Na poniższych wykresach znajduje się BMI badanych pacjentów w zależności od tego czy przechodzili udar mózgu czy nie.
+
+```{r}
+
+stroke_clean_bmi <- stroke[!stroke$bmi == "N/A",]
+
+stroke_clean_bmi$bmi  <- as.numeric(as.character(stroke_clean_bmi$bmi))
+
+stroke_clean_bmi$stroke <- as.factor(stroke_clean_bmi$stroke)
+  bmi_list <- lapply(levels(stroke_clean_bmi[["stroke"]]), 
+                       function(x) stroke_clean_bmi[ stroke_clean_bmi[, "stroke"] == x, "bmi"]
+)
+  
+names(bmi_list) <- c("no stroke", "stroke")
+  
+library(vioplot)
+
+vioplot(bmi_list, col=c("#512b58", "#fe346e"))
+
+#minimalne normalne bmi
+bmi_min <- 18.5
+lines(c(0, 4), c(bmi_min, bmi_min), col="blue", lty=2, lwd=0.2)
+text(2.4, bmi_min, paste("bmi_min =", bmi_min, sep=""), col="blue", pos=1, cex=0.6)
+
+#maksymalne normalne bmi
+bmi_max <- 24.9
+lines(c(0, 4), c(bmi_max, bmi_max), col="purple", lty=2, lwd=0.2)
+text(2.4, bmi_max, paste("bmi_max =", bmi_max, sep=""), col="purple", pos=3, cex=0.6)
+
+```
+
+
+
+```{r}
+
+# Konwersja na tekst, a następnie na liczby
+stroke$bmi <- as.numeric(as.character(stroke$bmi))
+stroke$bmi_category <- cut(stroke$bmi,
+                           breaks = c(-Inf, 19, 25, 30, Inf),
+                           labels = c("underweight", "normal", "overweight", "obesity"),
+                           include.lowest = TRUE)
+
+bmi_cat <- table(stroke$stroke, stroke$bmi_category)
+
+
+barplot(bmi_cat,
+main = "Stroke/No Stroke vs bmi",
+xlab = "bmi",
+col = c("#fe346e","#512b58"),
+beside = TRUE
+)
+legend("topleft",
+c("No stroke","Stroke"),
+fill = c("#fe346e","#512b58")
+)
+
+
+# Usunięcie wierszy, w których bmi = NA
+stroke <- na.omit(stroke)
+
+# Filtracja danych tylko dla stroke = 1
+filtered_stroke_data <- subset(stroke, stroke == 1)
+
+# Filtracja danych tylko dla stroke = 1 i usuwanie brakujących danych w kolumnie bmi
+filtered_stroke_data <- subset(stroke, stroke == 1 & !is.na(bmi))
+
+# Wykres histogramu BMI
+hist(filtered_stroke_data$bmi,
+     main = "Histogram BMI for Stroke = 1",
+     xlab = "BMI",
+     ylab = "Frequency",
+     col = "pink",
+     border = "black",
+     xlim = c(min(filtered_stroke_data$bmi), max(filtered_stroke_data$bmi)),
+     breaks = "Sturges"  # Możesz dostosować metodę podziału przedziałów, np. "Sturges", "FD", "Scott"
+)
+
+
+
+# BMI-Stroke Distribution
+
+ggplot(stroke, aes(x = bmi, fill = factor(stroke))) +
+  geom_density(alpha = 0.7) +
+  scale_fill_manual(values = c("#512b58", "#fe346e"), labels = c("Healthy", "Stroke")) +
+  labs(title = "BMI-Stroke Distribution",
+       x = "Body Mass Index (BMI)",
+       y = "") +
+  theme_minimal() +
+  xlim(0, 60) +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(title = NULL)) +
+  theme(axis.line.y = element_blank(),  
+        axis.text.y = element_blank())
+
+
+
+```
+
+Wykres BMI wskazuje, dużą zależność od ilości posiadanej masy ciała a prawdopodobieństwa występowania udaru u takiej osoby. 
+
+Otyłość a ryzyko udaru:
+Otyłość jest jednym z głównych czynników ryzyka chorób sercowo-naczyniowych, w tym udaru mózgu. Osoby z nadwagą i otyłe mają zazwyczaj podwyższoną presję krwi, zwiększone ryzyko cukrzycy typu 2, hiperlipidemię i stan zapalny, co może przyczynić się do powstawania zakrzepów i miażdżycy, prowadzących do udaru.
+
+Nadwaga a ryzyko udaru:
+Nawet umiarkowane zwiększenie masy ciała, niewłaściwa dystrybucja tkanki tłuszczowej i brak aktywności fizycznej mogą przyczyniać się do podwyższonego ryzyka udaru.
+
+Wpływ na czynniki ryzyka:
+Otyłość może wpływać na różne czynniki ryzyka, takie jak ciśnienie krwi, poziom cholesterolu, insulinooporność i stany zapalne, co z kolei wpływa na zdrowie układu sercowo-naczyniowego.
+
+
+### Płeć
+
+Poniżej znajduje się wykres na temat zależności udaru od płci na podstawie zgromadzonych danych.
+
+```{r}
+
+# Gender Risk
+ggplot(stroke, aes(y = factor(gender), fill = factor(stroke))) +
+  geom_bar(position = 'dodge', stat = 'count', width = 0.7) +
+  geom_text(aes(label = ..count..), stat = 'count', position = position_dodge(width = 0.7), hjust = -0.5) +  # Display count values on bars
+  scale_fill_manual(values = c("#2c003e", "#fe346e"), labels = c("Healthy", "Stroke")) +
+  labs(title = "Gender Risk",
+       x = "",
+       y = "Gender") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(title = NULL)) +
+  xlim(c(0, 3000))  # Set your desired x-axis limits
+```
+
+### Dodatkowe wykresy
+#### Typ wykonywanej pracy
+
+```{r}
+
+
+# Employment Risk
+ggplot(stroke, aes(x = factor(work_type), fill = factor(stroke))) +
+  geom_bar(position = 'dodge', stat = 'count', width = 0.7) +
+  geom_text(aes(label = ..count..), stat = 'count', position = position_dodge(width = 0.7), vjust = -0.5) +  # Display count values on bars
+  scale_fill_manual(values = c("#2c003e", "#fe346e"), labels = c("Healthy", "Stroke")) +
+  scale_x_discrete(labels = c("Private", "Self-Employed", "Children", "Gov-Job", "Never worked")) +  # Change labels here
+  labs(title = "Employment Risk",
+       x = "Work Type",
+       y = "") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(title = NULL)) +
+  ylim(c(0, 4000))  # Set your desired y-axis limits
+```
+
+
+#### Stan cywilny
+
+```{r}
+# Marrital Status
+ggplot(stroke, aes(x = factor(ever_married), fill = factor(stroke))) +
+  geom_bar(position = 'dodge', stat = 'count', width = 0.7) +
+  geom_text(aes(label = ..count..), stat = 'count', position = position_dodge(width = 0.7), vjust = -0.5) +  # Display count values on bars
+  scale_fill_manual(values = c("#2c003e", "#fe346e"), labels = c("Healthy", "Stroke")) +
+  labs(title = "Marrital Status And Risk",
+       x = "",
+       y = "") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(title = NULL)) +
+  ylim(c(0, 4000))  # Set your desired y-axis limits
+
+
+
+```
